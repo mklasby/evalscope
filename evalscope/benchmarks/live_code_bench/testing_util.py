@@ -75,9 +75,26 @@ class Capturing(list):
         sys.stdout = self._stdout
 
 
+_AST_PARSE_TIMEOUT = 10  # seconds; ceiling for a single ast.parse call
+
+
+def _timed_ast_parse(code: str):
+    """ast.parse with a dedicated timeout to catch adversarial inputs."""
+    start = time.monotonic()
+    remaining = signal.alarm(_AST_PARSE_TIMEOUT)
+    try:
+        return ast.parse(code)
+    finally:
+        elapsed = time.monotonic() - start
+        if remaining > 0:
+            signal.alarm(max(int(remaining - elapsed), 1))
+        else:
+            signal.alarm(0)
+
+
 def clean_if_name(code: str) -> str:
     try:
-        astree = ast.parse(code)
+        astree = _timed_ast_parse(code)
         last_block = astree.body[-1]
         if isinstance(last_block, ast.If):
             condition = last_block.test
@@ -95,7 +112,7 @@ def make_function(code: str) -> str:
     try:
         import_stmts = []
         all_other_stmts = []
-        astree = ast.parse(code)
+        astree = _timed_ast_parse(code)
         for stmt in astree.body:
             if isinstance(stmt, (ast.Import, ast.ImportFrom)):
                 import_stmts.append(stmt)

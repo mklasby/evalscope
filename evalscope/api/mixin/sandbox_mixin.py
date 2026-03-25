@@ -83,7 +83,7 @@ class EnclaveSandboxBackend(SandboxBackend):
             result = AsyncioLoopRunner.run(_execute_async(), timeout=timeout + 10)
             return result.model_dump(exclude_none=True)
         except (TimeoutError, asyncio.TimeoutError, cf.TimeoutError) as e:
-            logger.warning(f'Sandbox execution timed out after {timeout}s (language={language}): {e!r}')
+            logger.warning(f'Sandbox execution timed out after {timeout + 10}s (language={language}): {e!r}')
             return {
                 'status': ExecutionStatus.TIMEOUT,
                 'error': 'Code execution timed out.',

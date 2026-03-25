@@ -209,6 +209,9 @@ def openai_completion_params(model: str, config: GenerateConfig, tools: bool) ->
         )
     if config.extra_body:
         params['extra_body'] = config.extra_body
+    if config.chat_template_kwargs is not None:
+        params.setdefault('extra_body', {})
+        params['extra_body']['chat_template_kwargs'] = config.chat_template_kwargs
     if config.extra_query:
         params['extra_query'] = config.extra_query
     if config.extra_headers:
