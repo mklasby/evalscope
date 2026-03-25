@@ -47,7 +47,8 @@ LiveCodeBench is a contamination-free benchmark for evaluating code generation m
 - Default timeout is 6 seconds per test case
 - Supports `pass@k` metric calculation
 """,
-        dataset_id='AI-ModelScope/code_generation_lite',
+        # dataset_id='AI-ModelScope/code_generation_lite',
+        dataset_id='livecodebench/code_generation_lite',
         subset_list=['release_latest'],
         metric_list=['acc'],
         aggregation='mean_and_pass_at_k',

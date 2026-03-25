@@ -44,7 +44,8 @@ MATH-500 is a curated subset of 500 problems from the MATH benchmark, designed t
 - Results can be broken down by difficulty level
 - Commonly used for math reasoning benchmarking due to manageable size
 """,
-        dataset_id='AI-ModelScope/MATH-500',
+        # dataset_id='AI-ModelScope/MATH-500',
+        dataset_id='HuggingFaceH4/MATH-500',
         subset_list=['Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5'],
         metric_list=[{
             'acc': {
