@@ -56,7 +56,8 @@ GSM8K (Grade School Math 8K) is a high-quality dataset of 8.5K linguistically di
     BenchmarkMeta(
         name='gsm8k',
         pretty_name='GSM8K',
-        dataset_id='AI-ModelScope/gsm8k',
+        # dataset_id='AI-ModelScope/gsm8k',
+        dataset_id='openai/gsm8k',
         tags=[Tags.MATH, Tags.REASONING],
         description=GSM8K_DESCRIPTION,
         paper_url='https://arxiv.org/abs/2110.14168',

@@ -18,6 +18,13 @@ def openai_api() -> type[ModelAPI]:
     return OpenAICompatibleAPI
 
 
+@register_model_api(name='async_openai_api')
+def async_openai_api() -> type[ModelAPI]:
+    from .async_openai_compatible import AsyncOpenAICompatibleAPI
+
+    return AsyncOpenAICompatibleAPI
+
+
 @register_model_api(name='anthropic_api')
 def anthropic_api() -> type[ModelAPI]:
     check_import('anthropic', package='anthropic', raise_error=True, feature_name='anthropic_api')
