@@ -123,6 +123,9 @@ class GenerateConfig(BaseModel):
     extra_headers: Optional[Dict[str, str]] = Field(default=None)
     """Extra headers to be sent with requests to OpenAI compatible servers. OpenAI, vLLM, and SGLang only."""
 
+    chat_template_kwargs: Optional[Dict[str, Any]] = Field(default=None)
+    """Extra kwargs forwarded to the chat template (e.g. enable_thinking). Sent via extra_body to vLLM/SGLang."""
+
     height: Optional[int] = Field(default=None)
     """Image height for image generation model only"""
 
