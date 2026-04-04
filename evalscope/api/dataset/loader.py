@@ -87,9 +87,6 @@ class RemoteDataLoader(DataLoader):
     def load(self) -> Dataset:
         import datasets
         from datasets import DownloadMode as HFDownloadMode
-        from datasets.features import Audio, Image
-        from modelscope import MsDataset
-        from modelscope.utils.constant import DownloadMode as MSDownloadMode
 
         path = self.data_id_or_path
         # resolve data_to_sample function
@@ -114,9 +111,11 @@ class RemoteDataLoader(DataLoader):
             )
             # prepare download_mode for both backends when force_redownload is requested
             hf_download_mode = None if not self.force_redownload else HFDownloadMode.FORCE_REDOWNLOAD
-            ms_download_mode = None if not self.force_redownload else MSDownloadMode.FORCE_REDOWNLOAD
 
             if self.data_source == HubType.MODELSCOPE:
+                from modelscope import MsDataset
+                from modelscope.utils.constant import DownloadMode as MSDownloadMode
+                ms_download_mode = None if not self.force_redownload else MSDownloadMode.FORCE_REDOWNLOAD
                 dataset = MsDataset.load(
                     dataset_name=path,
                     split=self.split,
