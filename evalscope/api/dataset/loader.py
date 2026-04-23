@@ -6,6 +6,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Union
 
+from huggingface_hub import scan_cache_dir
+
 from evalscope.api.dataset.utils import record_to_sample_fn
 from evalscope.constants import DEFAULT_EVALSCOPE_CACHE_DIR, HubType
 from evalscope.utils import get_logger
@@ -14,6 +16,26 @@ from .dataset import Dataset, FieldSpec, MemoryDataset, Sample
 from .utils import data_to_samples, shuffle_choices_if_requested
 
 logger = get_logger()
+
+
+def _find_cached_dataset_snapshot(dataset_name: str) -> Optional[Path]:
+    if Path(dataset_name).exists():
+        return None
+
+    try:
+        cache_info = scan_cache_dir()
+    except Exception:
+        return None
+
+    for repo in cache_info.repos:
+        if repo.repo_type != 'dataset' or repo.repo_id != dataset_name:
+            continue
+
+        revision = next(iter(repo.revisions), None)
+        if revision is not None:
+            return Path(revision.snapshot_path)
+
+    return None
 
 
 class DataLoader(ABC):
@@ -123,15 +145,38 @@ class RemoteDataLoader(DataLoader):
                     logger.info(f'Removing dataset_infos.json file at {dataset_infos_path} to avoid datasets errors.')
                     os.remove(dataset_infos_path)
                 # load dataset from Huggingface or local path
-                dataset = datasets.load_dataset(
-                    path=path,
-                    name=self.subset if self.subset != 'default' else None,
-                    split=self.split,
-                    revision=self.version,
-                    trust_remote_code=self.trust_remote,
-                    download_mode=hf_download_mode,
+                load_kwargs = {
+                    'path': path,
+                    'name': self.subset if self.subset != 'default' else None,
+                    'split': self.split,
+                    'revision': self.version,
+                    'trust_remote_code': self.trust_remote,
+                    'download_mode': hf_download_mode,
                     **self.kwargs,
-                )
+                }
+                try:
+                    dataset = datasets.load_dataset(**load_kwargs)
+                except Exception as exc:
+                    snapshot_path = None
+                    if self.data_source == HubType.HUGGINGFACE:
+                        snapshot_path = _find_cached_dataset_snapshot(path)
+
+                    if snapshot_path is None:
+                        raise
+
+                    logger.warning(
+                        'Falling back to cached Hub snapshot for dataset %s at %s after load_dataset failed: %s',
+                        path,
+                        snapshot_path,
+                        exc,
+                    )
+                    dataset = datasets.load_dataset(
+                        **{
+                            **load_kwargs,
+                            'path': str(snapshot_path),
+                            'revision': None,
+                        }
+                    )
 
             # Only save to disk if not loading from local path
             if self.data_source != HubType.LOCAL:
