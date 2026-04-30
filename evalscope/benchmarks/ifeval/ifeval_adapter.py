@@ -49,7 +49,7 @@ IFEval (Instruction-Following Eval) is a benchmark for evaluating how well langu
 - Automatic verification of instruction compliance
 """,
         tags=[Tags.INSTRUCTION_FOLLOWING],
-        dataset_id='opencompass/ifeval',
+        dataset_id='google/IFEval',
         subset_list=['default'],
         metric_list=[
             'prompt_level_strict',

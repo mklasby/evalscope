@@ -116,7 +116,7 @@ AIME 2024 (American Invitational Mathematics Examination 2024) is a benchmark ba
 - Only integer answers are accepted (matching AIME format)
 - Problems are significantly harder than GSM8K or standard MATH benchmark
 """,
-        dataset_id='evalscope/aime24',
+        dataset_id='HuggingFaceH4/aime_2024',
         subset_list=['default'],
         metric_list=[{
             'acc': {
@@ -125,7 +125,7 @@ AIME 2024 (American Invitational Mathematics Examination 2024) is a benchmark ba
         }],
         few_shot_num=0,
         train_split=None,
-        eval_split='test',
+        eval_split='train',
         prompt_template=PROMPT_TEMPLATE,
     )
 )
@@ -135,9 +135,10 @@ class AIME24Adapter(DefaultDataAdapter):
         super().__init__(*args, **kwargs)
 
     def record_to_sample(self, record: Dict[str, Any]) -> Sample:
+        target = record.get('answer', '') or record.get('solution', '')
         return Sample(
             input=record['problem'],
-            target=record.get('answer', '') or record.get('solution', ''),
+            target=str(target),
         )
 
     def extract_answer(self, prediction: str, task_state: TaskState) -> str:
@@ -225,7 +226,7 @@ AIME 2025 (American Invitational Mathematics Examination 2025) is a benchmark ba
 - Answers should be formatted within `\\boxed{}` for proper extraction
 - Uses LLM-as-judge for mathematical equivalence checking
 """,
-        dataset_id='evalscope/aime25',
+        dataset_id='MathArena/aime_2025',
         subset_list=['default'],
         metric_list=[{
             'acc': {
@@ -234,7 +235,7 @@ AIME 2025 (American Invitational Mathematics Examination 2025) is a benchmark ba
         }],
         few_shot_num=0,
         train_split=None,
-        eval_split='test',
+        eval_split='train',
         prompt_template=PROMPT_TEMPLATE,
     )
 )
@@ -273,7 +274,7 @@ AIME 2026 (American Invitational Mathematics Examination 2026) is a benchmark ba
 - Answers should be formatted within `\\boxed{}` for proper extraction
 - Uses LLM-as-judge for mathematical equivalence checking
 """,
-        dataset_id='evalscope/aime26',
+        dataset_id='MathArena/aime_2026',
         subset_list=['default'],
         metric_list=[{
             'acc': {
@@ -282,7 +283,7 @@ AIME 2026 (American Invitational Mathematics Examination 2026) is a benchmark ba
         }],
         few_shot_num=0,
         train_split=None,
-        eval_split='test',
+        eval_split='train',
         prompt_template=PROMPT_TEMPLATE,
     )
 )

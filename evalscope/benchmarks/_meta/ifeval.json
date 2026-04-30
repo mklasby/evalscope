@@ -1,7 +1,7 @@
 {
   "meta": {
     "pretty_name": "IFEval",
-    "dataset_id": "opencompass/ifeval",
+    "dataset_id": "google/IFEval",
     "paper_url": null,
     "tags": [
       "InstructionFollowing"

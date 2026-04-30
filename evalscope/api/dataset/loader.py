@@ -107,7 +107,7 @@ class RemoteDataLoader(DataLoader):
 
     def load(self) -> Dataset:
         import datasets
-        from datasets import DownloadMode as HFDownloadMode
+        from datasets import Audio, DownloadMode as HFDownloadMode, Image
 
         path = self.data_id_or_path
         # resolve data_to_sample function

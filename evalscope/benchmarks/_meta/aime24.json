@@ -1,7 +1,7 @@
 {
   "meta": {
     "pretty_name": "AIME-2024",
-    "dataset_id": "evalscope/aime24",
+    "dataset_id": "HuggingFaceH4/aime_2024",
     "paper_url": null,
     "tags": [
       "Math",
@@ -15,7 +15,7 @@
       }
     ],
     "few_shot_num": 0,
-    "eval_split": "test",
+    "eval_split": "train",
     "train_split": "",
     "subset_list": [
       "default"
