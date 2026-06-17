@@ -17,6 +17,17 @@ from .utils import data_to_samples, shuffle_choices_if_requested
 
 logger = get_logger()
 
+LIVECODEBENCH_REPO_ID = 'livecodebench/code_generation_lite'
+LIVECODEBENCH_DATA_FILES = {
+    'test': f'hf://datasets/{LIVECODEBENCH_REPO_ID}/test*.jsonl',
+}
+
+
+def _livecodebench_data_files(snapshot_path: Optional[Path]) -> dict[str, str]:
+    if snapshot_path is None:
+        return LIVECODEBENCH_DATA_FILES
+    return {'test': str(snapshot_path / 'test*.jsonl')}
+
 
 def _shuffle_in_place(data: list, seed: Optional[int]) -> None:
     """Shuffle a list in place with an optional seed.
@@ -156,15 +167,28 @@ class RemoteDataLoader(DataLoader):
                     logger.info(f'Removing dataset_infos.json file at {dataset_infos_path} to avoid datasets errors.')
                     os.remove(dataset_infos_path)
                 # load dataset from Huggingface or local path
-                load_kwargs = {
-                    'path': path,
-                    'name': self.subset if self.subset != 'default' else None,
-                    'split': self.split,
-                    'revision': self.version,
-                    'trust_remote_code': self.trust_remote,
-                    'download_mode': hf_download_mode,
-                    **self.kwargs,
-                }
+                if (
+                    self.data_source == HubType.HUGGINGFACE
+                    and path == LIVECODEBENCH_REPO_ID
+                    and self.subset == 'release_latest'
+                ):
+                    snapshot_path = _find_cached_dataset_snapshot(path)
+                    load_kwargs = {
+                        'path': 'json',
+                        'data_files': _livecodebench_data_files(snapshot_path),
+                        'split': self.split,
+                        'download_mode': hf_download_mode,
+                        **self.kwargs,
+                    }
+                else:
+                    load_kwargs = {
+                        'path': path,
+                        'name': self.subset if self.subset != 'default' else None,
+                        'split': self.split,
+                        'revision': self.version,
+                        'download_mode': hf_download_mode,
+                        **self.kwargs,
+                    }
                 try:
                     dataset = datasets.load_dataset(**load_kwargs)
                 except Exception as exc:
