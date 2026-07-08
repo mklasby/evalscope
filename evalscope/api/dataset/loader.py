@@ -29,6 +29,24 @@ def _livecodebench_data_files(snapshot_path: Optional[Path]) -> dict[str, str]:
     return {'test': str(snapshot_path / 'test*.jsonl')}
 
 
+def _livecodebench_features():
+    import datasets
+
+    return datasets.Features({
+        'question_title': datasets.Value('string'),
+        'question_content': datasets.Value('string'),
+        'platform': datasets.Value('string'),
+        'question_id': datasets.Value('string'),
+        'contest_id': datasets.Value('string'),
+        'contest_date': datasets.Value('string'),
+        'starter_code': datasets.Value('string'),
+        'difficulty': datasets.Value('string'),
+        'public_test_cases': datasets.Value('string'),
+        'private_test_cases': datasets.Value('string'),
+        'metadata': datasets.Value('string'),
+    })
+
+
 def _shuffle_in_place(data: list, seed: Optional[int]) -> None:
     """Shuffle a list in place with an optional seed.
 
@@ -176,6 +194,7 @@ class RemoteDataLoader(DataLoader):
                     load_kwargs = {
                         'path': 'json',
                         'data_files': _livecodebench_data_files(snapshot_path),
+                        'features': _livecodebench_features(),
                         'split': self.split,
                         'download_mode': hf_download_mode,
                         **self.kwargs,
