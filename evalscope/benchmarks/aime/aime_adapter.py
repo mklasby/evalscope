@@ -149,10 +149,8 @@ class AIME24Adapter(DefaultDataAdapter):
         super().__init__(*args, **kwargs)
 
     def record_to_sample(self, record: Dict[str, Any]) -> Sample:
-        return Sample(
-            input=record['problem'],
-            target=record.get('answer', '') or record.get('solution', ''),
-        )
+        target = record.get('answer', '') or record.get('solution', '')
+        return Sample(input=record['problem'], target=str(target))
 
     def extract_answer(self, prediction: str, task_state: TaskState) -> str:
         from evalscope.metrics.math.parser import extract_answer

@@ -5,7 +5,13 @@ from typing import Any
 
 import pytest
 
-from evalscope.api.dataset import DatasetHub, download_dataset_file, download_dataset_snapshot
+from evalscope.api.dataset import (
+    DatasetHub,
+    download_dataset_file,
+    download_dataset_snapshot,
+    load_dataset_from_hub,
+)
+from evalscope.api.dataset import hub as hub_module
 from evalscope.constants import HubType
 
 
@@ -116,3 +122,60 @@ def test_download_file_modelscope_uses_single_file_api(tmp_path: Path, monkeypat
         ('remote-dataset', 'images/page_[1].png', {'revision': 'v1', 'local_files_only': True}),
         ('remote-dataset', 'images/page_[1].png', {'revision': 'v1'}),
     ]
+
+
+def test_huggingface_load_retries_from_cached_snapshot(monkeypatch) -> None:
+    calls = []
+
+    def fake_load_dataset(**kwargs):
+        calls.append(kwargs)
+        if kwargs['path'] == 'org/data':
+            raise ConnectionError('offline')
+        return {'loaded': kwargs['path']}
+
+    monkeypatch.setattr('datasets.load_dataset', fake_load_dataset)
+    monkeypatch.setattr(
+        hub_module,
+        '_find_cached_dataset_snapshot',
+        lambda dataset_name: Path('/tmp/hf-snapshot'),
+    )
+
+    result = load_dataset_from_hub(
+        'org/data',
+        split='test',
+        data_source=HubType.HUGGINGFACE,
+    )
+
+    assert result == {'loaded': '/tmp/hf-snapshot'}
+    assert [call['path'] for call in calls] == ['org/data', '/tmp/hf-snapshot']
+    assert calls[1]['revision'] is None
+
+
+def test_livecodebench_json_loader_preserves_contest_date_strings(monkeypatch) -> None:
+    calls = []
+    snapshots = iter([None, Path('/tmp/livecodebench')])
+
+    def fake_load_dataset(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise ConnectionError('offline')
+        return {'loaded': kwargs['data_files']}
+
+    monkeypatch.setattr('datasets.load_dataset', fake_load_dataset)
+    monkeypatch.setattr(
+        hub_module,
+        '_find_cached_dataset_snapshot',
+        lambda dataset_name: next(snapshots),
+    )
+
+    result = load_dataset_from_hub(
+        'livecodebench/code_generation_lite',
+        split='test',
+        subset='release_latest',
+        data_source=HubType.HUGGINGFACE,
+    )
+
+    assert result == {'loaded': {'test': '/tmp/livecodebench/test*.jsonl'}}
+    assert calls[0]['path'] == 'json'
+    assert calls[1]['path'] == 'json'
+    assert calls[1]['features']['contest_date'].dtype == 'string'

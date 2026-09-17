@@ -3,12 +3,64 @@
 import inspect
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Optional, Union
+
+from huggingface_hub import scan_cache_dir
 
 from evalscope.constants import HubType
 from evalscope.utils.logger import get_logger
 
 logger = get_logger()
+
+LIVECODEBENCH_REPO_ID = 'livecodebench/code_generation_lite'
+LIVECODEBENCH_DATA_FILES = {
+    'test': f'hf://datasets/{LIVECODEBENCH_REPO_ID}/test*.jsonl',
+}
+
+
+def _find_cached_dataset_snapshot(dataset_name: str) -> Optional[Path]:
+    if Path(dataset_name).exists():
+        return None
+
+    try:
+        cache_info = scan_cache_dir()
+    except Exception:
+        return None
+
+    for repo in cache_info.repos:
+        if repo.repo_type != 'dataset' or repo.repo_id != dataset_name:
+            continue
+        revision = next(iter(repo.revisions), None)
+        if revision is not None:
+            return Path(revision.snapshot_path)
+    return None
+
+
+def _livecodebench_data_files(snapshot_path: Optional[Path]) -> dict[str, str]:
+    if snapshot_path is None:
+        return LIVECODEBENCH_DATA_FILES
+    return {'test': str(snapshot_path / 'test*.jsonl')}
+
+
+def _livecodebench_features():
+    import datasets
+
+    return datasets.Features(
+        {
+            'question_title': datasets.Value('string'),
+            'question_content': datasets.Value('string'),
+            'platform': datasets.Value('string'),
+            'question_id': datasets.Value('string'),
+            'contest_id': datasets.Value('string'),
+            'contest_date': datasets.Value('string'),
+            'starter_code': datasets.Value('string'),
+            'difficulty': datasets.Value('string'),
+            'public_test_cases': datasets.Value('string'),
+            'private_test_cases': datasets.Value('string'),
+            'metadata': datasets.Value('string'),
+        }
+    )
 
 
 @dataclass(frozen=True)
@@ -110,17 +162,52 @@ def load_dataset_from_hub(
             logger.info(f'Removing dataset_infos.json file at {dataset_infos_path} to avoid datasets errors.')
             os.remove(dataset_infos_path)
 
-        load_kwargs = dict(
-            path=data_id_or_path,
-            name=subset if subset != 'default' else None,
-            split=split,
-            revision=version,
-            download_mode=hf_download_mode,
-            **kwargs,
+        is_livecodebench_json = (
+            data_source == HubType.HUGGINGFACE
+            and data_id_or_path == LIVECODEBENCH_REPO_ID
+            and subset == 'release_latest'
         )
+        if is_livecodebench_json:
+            snapshot_path = _find_cached_dataset_snapshot(data_id_or_path)
+            load_kwargs = dict(
+                path='json',
+                data_files=_livecodebench_data_files(snapshot_path),
+                split=split,
+                download_mode=hf_download_mode,
+                features=_livecodebench_features(),
+                **kwargs,
+            )
+        else:
+            load_kwargs = dict(
+                path=data_id_or_path,
+                name=subset if subset != 'default' else None,
+                split=split,
+                revision=version,
+                download_mode=hf_download_mode,
+                **kwargs,
+            )
         if 'trust_remote_code' in inspect.signature(datasets.load_dataset).parameters:
             load_kwargs['trust_remote_code'] = trust_remote
-        return datasets.load_dataset(**load_kwargs)
+        try:
+            return datasets.load_dataset(**load_kwargs)
+        except Exception as exc:
+            snapshot_path = None
+            if data_source == HubType.HUGGINGFACE:
+                snapshot_path = _find_cached_dataset_snapshot(data_id_or_path)
+            if snapshot_path is None:
+                raise
+            logger.warning(
+                'Falling back to cached Hub snapshot for dataset %s at %s after load_dataset failed: %s',
+                data_id_or_path,
+                snapshot_path,
+                exc,
+            )
+            if is_livecodebench_json:
+                load_kwargs['data_files'] = _livecodebench_data_files(snapshot_path)
+            else:
+                load_kwargs['path'] = str(snapshot_path)
+                load_kwargs['revision'] = None
+            return datasets.load_dataset(**load_kwargs)
 
     raise ValueError(f'Unsupported dataset hub: {data_source}')
 
