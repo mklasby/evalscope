@@ -18,23 +18,30 @@ def predict(model: Model, sample: Sample) -> InferenceResult:
     row = sample.metadata
     is_fc_model = row.get('is_fc_model', False)
 
+    stop_reasons = []
     if is_fc_model:
-        response, model_usage, history = generate_turn_with_tools(model, row)
+        response, model_usage, history = generate_turn_with_tools(model, row, stop_reasons)
     else:
-        response, model_usage, history = generate_turn(model, row)
+        response, model_usage, history = generate_turn(model, row, stop_reasons)
 
     sample.metadata['generation'] = response
     agent_messages = [m if not isinstance(m, dict) else dict_to_chat_message(m) for m in history]
+    choice = ChatCompletionChoice.from_content(json.dumps(response, ensure_ascii=False, indent=2))
+    # The first step that did not end on its own (token cap, model length, a server-side stop) is the sample's stop
+    # reason, so the sample is not reported as finished.
+    unfinished = [reason for reason in stop_reasons if reason not in ('stop', 'tool_calls')]
+    if unfinished:
+        choice.stop_reason = unfinished[0]
     output = ModelOutput(
         model=model.name,
-        choices=[ChatCompletionChoice.from_content(json.dumps(response, ensure_ascii=False, indent=2))],
+        choices=[choice],
         model_usage=model_usage,
         time=time.time(),
     )
     return InferenceResult(output=output, messages=agent_messages)
 
 
-def generate_turn(model: Model, row: dict[str, Any]):
+def generate_turn(model: Model, row: dict[str, Any], stop_reasons: list):
     from bfcl_eval.constants.default_prompts import (
         DEFAULT_USER_PROMPT_FOR_ADDITIONAL_FUNCTION_PROMPTING,
         MAXIMUM_STEP_LIMIT,
@@ -72,6 +79,7 @@ def generate_turn(model: Model, row: dict[str, Any]):
 
             # Get model response using generate method
             model_output = model.generate(chat_messages)
+            stop_reasons.append(model_output.stop_reason)
 
             # Handle the response based on the model output structure
             message = model_output.message
@@ -129,7 +137,7 @@ def generate_turn(model: Model, row: dict[str, Any]):
     return all_model_responses, model_usage, current_messages
 
 
-def generate_turn_with_tools(model: Model, row: dict[str, Any]):
+def generate_turn_with_tools(model: Model, row: dict[str, Any], stop_reasons: list):
     from bfcl_eval.constants.default_prompts import DEFAULT_USER_PROMPT_FOR_ADDITIONAL_FUNCTION_FC, MAXIMUM_STEP_LIMIT
     from bfcl_eval.eval_checker.multi_turn_eval.multi_turn_utils import execute_multi_turn_func_call
     from bfcl_eval.model_handler.utils import convert_to_function_call
@@ -177,6 +185,7 @@ def generate_turn_with_tools(model: Model, row: dict[str, Any]):
 
             # Get model response
             model_output = model.generate(current_sample.input, tools=current_sample.tools)
+            stop_reasons.append(model_output.stop_reason)
 
             # Handle the response based on the model output structure
             message = model_output.message

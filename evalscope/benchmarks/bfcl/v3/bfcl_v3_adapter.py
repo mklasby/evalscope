@@ -3,7 +3,7 @@ import traceback
 from typing import Any, Dict, List
 
 from evalscope.api.benchmark import AgentAdapter, BenchmarkMeta
-from evalscope.api.dataset import Sample
+from evalscope.api.dataset import DatasetDict, Sample, build_dataset_from_records
 from evalscope.api.evaluator import InferenceResult, TaskState
 from evalscope.api.messages.chat_message import ChatMessageUser
 from evalscope.api.metric import Score
@@ -72,12 +72,13 @@ BFCL (Berkeley Function Calling Leaderboard) v3 is the first comprehensive and e
 ## Evaluation Notes
 
 - Requires `pip install bfcl-eval==2025.10.27.1` before evaluation
+- The test entries come from the bfcl-eval package's own data (4,441 entries in 2025.10.27.1), not a dataset hub
 - Set `is_fc_model=True` for models with native function calling support
 - `underscore_to_dot` parameter controls function name formatting
 - See the [usage documentation](https://evalscope.readthedocs.io/en/latest/third_party/bfcl_v3.html) for detailed setup
 - Results broken down by category (AST, Relevance, Multi-turn)
 """,
-        dataset_id='AI-ModelScope/bfcl_v3',
+        dataset_id='bfcl_eval',
         subset_list=list(SUBJECT_MAPPING.keys()),
         metric_list=['acc'],
         eval_split='train',
@@ -106,40 +107,34 @@ class BFCLV3Adapter(AgentAdapter):
         check_import('bfcl_eval', extra='bfcl', raise_error=True, feature_name=self.pretty_name)
 
         self.category_map = SUBJECT_MAPPING
-        self.reformat_subset = True
+        # load() builds one dataset per subset.
+        self.reformat_subset = False
         self.add_overall_metric = False
 
         self.underscore_to_dot = self.extra_params.get('underscore_to_dot', True)
         self.is_fc_model = self.extra_params.get('is_fc_model', True)
 
-    def preprocess_row(self, row: dict):
-        """
-        Inplace preprocess the row to ensure it has the correct format for BFCL evaluation.
-        """
-        row['should_execute_tool_calls'] = True if row['multi_turn'] else False
-        row['functions'] = json.loads(row['functions'])
-        row['tools'] = json.loads(row['tools'])
-        row['turns'] = json.loads(row['turns'])
-        row['missing_functions'] = json.loads(row['missed_functions'])
-        row['ground_truth'] = json.loads(row.get('ground_truth', '{}'))
-        row['initial_config'] = json.loads(row['initial_config'])
-        row['is_fc_model'] = self.is_fc_model
+    def load(self):
+        """Every subset's entries from the bfcl-eval package (package_data.py), the rows already in the prompt form
+        of the model's mode: no system prompt for a function-calling model, Gorilla's for a prompting one."""
+        from .package_data import load_bfcl_v3_rows
+
+        datasets = {}
+        for subset in self.subset_list:
+            datasets[subset] = build_dataset_from_records(
+                records=load_bfcl_v3_rows(subset, self.is_fc_model),
+                sample_fields=self.record_to_sample,
+                name=subset,
+                location=self.dataset_id,
+                limit=self.limit,
+                repeats=self.repeats,
+                shuffle=self.shuffle,
+                seed=None,
+            )
+        return DatasetDict(datasets), None
 
     def record_to_sample(self, record: Dict[str, Any]) -> Sample:
         """Convert a data record to a Sample object."""
-        self.preprocess_row(record)
-
-        # If the model is a function calling model, we need to remove the system prompt
-        if self.is_fc_model:
-            turns = record['turns']
-            new_turns = []
-            for turn_idx, messages in enumerate(turns):
-                current_messages = messages.copy()
-                if len(current_messages) > 0 and current_messages[0]['role'] == 'system':
-                    current_messages = current_messages[1:]
-                new_turns.append(current_messages)
-            record['turns'] = new_turns
-
         return Sample(
             input=[ChatMessageUser(content=json.dumps(record['turns']))],
             target=json.dumps(record['ground_truth']),  # Will use the record for evaluation
