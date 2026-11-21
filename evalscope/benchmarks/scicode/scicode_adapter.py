@@ -1,6 +1,7 @@
 # Copyright (c) Alibaba, Inc. and its affiliates.
 # flake8: noqa: E501
 
+import dataclasses
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, cast
@@ -73,7 +74,13 @@ SciCode is a challenging benchmark designed to evaluate language model capabilit
                 'type': 'bool',
                 'value': False,
                 'description': "Include scientific background information written by scientists for the problem in the model's prompt.",
-            }
+            },
+            'test_data_path': {
+                'type': 'str',
+                'value': '',
+                'description': 'Host path of test_data.h5 (e.g. a Hugging Face Hub cache file). When set, nothing is downloaded. '
+                'Either way the file is mounted read-only at /workspace/test_data.h5 rather than copied into the image.',
+            },
         },
         sandbox_config={
             'image': 'scicode-benchmark:latest',
@@ -98,21 +105,33 @@ class SciCodeAdapter(CodeExecutionSandboxMixin, MultiTurnAdapter):
         self.system_prompt = INITIAL_PROMPT_PROVIDE_BACKGROUND if self.provide_background else INITIAL_PROMPT
         self.prompt_template = SUBPROBLEM_PROMPT_PROVIDE_BACKGROUND if self.provide_background else SUBPROBLEM_PROMPT
         self.docker_path = Path(__file__).parent / 'docker'
+        self.given_test_data_path = self.extra_params.get('test_data_path') or ''
+        self.test_data_path = Path(self.given_test_data_path or self.docker_path / 'test_data.h5').resolve()
+        # The test data is mounted read-only into every sandbox, not baked into the image (1 GB). This adapter's copy of
+        # the meta carries the mount, so the registry's meta is left unchanged.
+        sandbox_config = dict(self._benchmark_meta.sandbox_config or {})
+        volumes = dict(sandbox_config.get('volumes') or {})
+        volumes[str(self.test_data_path)] = {'bind': '/workspace/test_data.h5', 'mode': 'ro'}
+        sandbox_config['volumes'] = volumes
+        self._benchmark_meta = dataclasses.replace(self._benchmark_meta, sandbox_config=sandbox_config)
 
     def load(self):
         """
-        Download the test data if it does not exist.
+        Download the test data if it does not exist and no test_data_path was given.
         """
-        test_data_path = self.docker_path / 'test_data.h5'
-        source_path = DatasetHub(
-            data_id_or_path=self.dataset_id,
-            data_source=self.dataset_hub,
-            revision=self.dataset_revision,
-            force_redownload=self.force_redownload,
-            cache_dir=self.dataset_dir,
-        ).download_file('test_data.h5')
-        if Path(source_path).resolve() != test_data_path.resolve():
-            shutil.copyfile(source_path, test_data_path)
+        if self.given_test_data_path:
+            if not self.test_data_path.is_file():
+                raise FileNotFoundError(f'SciCode test_data_path {self.test_data_path} does not exist.')
+        else:
+            source_path = DatasetHub(
+                data_id_or_path=self.dataset_id,
+                data_source=self.dataset_hub,
+                revision=self.dataset_revision,
+                force_redownload=self.force_redownload,
+                cache_dir=self.dataset_dir,
+            ).download_file('test_data.h5')
+            if Path(source_path).resolve() != self.test_data_path:
+                shutil.copyfile(source_path, self.test_data_path)
         return super().load()
 
     def record_to_sample(self, record: Dict[str, Any]) -> Sample:
@@ -211,7 +230,7 @@ class SciCodeAdapter(CodeExecutionSandboxMixin, MultiTurnAdapter):
             name_prefix='scicode-benchmark',
             context_dir=self.docker_path.as_posix(),
             dockerfile=(self.docker_path / 'Dockerfile').as_posix(),
-            cache_key_parts=['sandbox', 'scicode-benchmark:latest'],
+            cache_key_parts=['sandbox', 'scicode-benchmark:latest', 'pinned-mounted-test-data'],
         )
 
     def _verify_subproblem(self, subproblem: Dict[str, Any], state: TaskState) -> Score:
