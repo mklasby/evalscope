@@ -1,0 +1,10 @@
+# NLTK data packages BigCodeBench tasks load (stopwords, words, punkt, vader_lexicon, averaged_perceptron_tagger; TextBlob's brown, punkt,
+# wordnet, averaged_perceptron_tagger), from nltk/nltk_data at commit 550b6625bcef1f2abff2ff770a5a0d272c9c6b2a. Each SHA-256 was taken at download
+# and the files' MD5s match NLTK's own index.xml at that commit. Columns: install directory, URL, SHA-256.
+corpora	https://raw.githubusercontent.com/nltk/nltk_data/550b6625bcef1f2abff2ff770a5a0d272c9c6b2a/packages/corpora/stopwords.zip	48c0e52d8b52546e827f53761fb30300c0ab94f70660d28bd65ba0a86270946b
+corpora	https://raw.githubusercontent.com/nltk/nltk_data/550b6625bcef1f2abff2ff770a5a0d272c9c6b2a/packages/corpora/words.zip	54ed02917d6771dcc3e8141218960d020947f7f2ccfd9ac9b320979349746015
+corpora	https://raw.githubusercontent.com/nltk/nltk_data/550b6625bcef1f2abff2ff770a5a0d272c9c6b2a/packages/corpora/brown.zip	9b275f9b3b95d7bd66ccfb7cd259f445a13bbe5d1f4107aba09fd3e8364bafa6
+corpora	https://raw.githubusercontent.com/nltk/nltk_data/550b6625bcef1f2abff2ff770a5a0d272c9c6b2a/packages/corpora/wordnet.zip	cbda5ea6eef7f36a97a43d4a75f85e07fccbb4f23657d27b4ccbc93e2646ab59
+tokenizers	https://raw.githubusercontent.com/nltk/nltk_data/550b6625bcef1f2abff2ff770a5a0d272c9c6b2a/packages/tokenizers/punkt.zip	51c3078994aeaf650bfc8e028be4fb42b4a0d177d41c012b6a983979653660ec
+sentiment	https://raw.githubusercontent.com/nltk/nltk_data/550b6625bcef1f2abff2ff770a5a0d272c9c6b2a/packages/sentiment/vader_lexicon.zip	8adba4294eef3964d820bf655e37e61bdc3a341994356af59b74fb3b4a36ce5c
+taggers	https://raw.githubusercontent.com/nltk/nltk_data/550b6625bcef1f2abff2ff770a5a0d272c9c6b2a/packages/taggers/averaged_perceptron_tagger.zip	e1f13cf2532daadfd6f3bc481a49859f0b8ea6432ccdcd83e6a49a5f19008de9
