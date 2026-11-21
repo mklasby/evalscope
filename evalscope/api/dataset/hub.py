@@ -5,6 +5,7 @@ import os
 import re
 from copy import deepcopy
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, List, Mapping, Optional, Sequence, Union
 
 from evalscope.constants import HubType
@@ -42,6 +43,61 @@ _HF_LOAD_ONLY_OPTIONS = {
     'ignore_verifications',
     'task',
 }
+
+# LiveCodeBench's release_latest is read from the repository's test JSONL files, not its loading script.
+LIVECODEBENCH_REPO_ID = 'livecodebench/code_generation_lite'
+LIVECODEBENCH_DATA_FILES = {
+    'test': f'hf://datasets/{LIVECODEBENCH_REPO_ID}/test*.jsonl',
+}
+
+
+def _find_cached_dataset_snapshot(dataset_name: str) -> Optional[Path]:
+    """Return a cached Hugging Face Hub snapshot of the dataset repository, or None."""
+    if Path(dataset_name).exists():
+        return None
+
+    try:
+        from huggingface_hub import scan_cache_dir
+
+        cache_info = scan_cache_dir()
+    except Exception:
+        return None
+
+    for repo in cache_info.repos:
+        if repo.repo_type != 'dataset' or repo.repo_id != dataset_name:
+            continue
+        revision = next(iter(repo.revisions), None)
+        if revision is not None:
+            return Path(revision.snapshot_path)
+    return None
+
+
+def _livecodebench_data_files(snapshot_path: Optional[Path]) -> dict[str, str]:
+    if snapshot_path is None:
+        return LIVECODEBENCH_DATA_FILES
+    return {'test': str(snapshot_path / 'test*.jsonl')}
+
+
+def _livecodebench_features():
+    """Every LiveCodeBench field as a string; the adapter's date filter parses contest_date with
+    datetime.fromisoformat, which needs a string, not the timestamp the JSON reader would infer."""
+    import datasets
+
+    return datasets.Features(
+        {
+            'question_title': datasets.Value('string'),
+            'question_content': datasets.Value('string'),
+            'platform': datasets.Value('string'),
+            'question_id': datasets.Value('string'),
+            'contest_id': datasets.Value('string'),
+            'contest_date': datasets.Value('string'),
+            'starter_code': datasets.Value('string'),
+            'difficulty': datasets.Value('string'),
+            'public_test_cases': datasets.Value('string'),
+            'private_test_cases': datasets.Value('string'),
+            'metadata': datasets.Value('string'),
+        }
+    )
 
 
 @dataclass(frozen=True)
@@ -101,8 +157,10 @@ class DatasetHub:
     ) -> 'Union[HFDataset, HFIterableDataset]':
         """Load a split, optionally using caller-owned storage for cached snapshot parsing."""
         source = _resolve_data_source(self.data_id_or_path, self.data_source)
-        if source in (HubType.LOCAL, HubType.HUGGINGFACE):
+        if source == HubType.LOCAL:
             return self._load_huggingface(self.data_id_or_path, split, subset, kwargs)
+        if source == HubType.HUGGINGFACE:
+            return self._load_huggingface_hub(split, subset, kwargs)
         if source == HubType.MODELSCOPE:
             return self._load_modelscope(split, subset, kwargs, _snapshot_cache_dir)
         raise ValueError(f'Unsupported dataset hub: {source}')
@@ -116,12 +174,14 @@ class DatasetHub:
         *,
         cached_snapshot: bool = False,
         snapshot_cache_dir: Optional[Callable[[], str]] = None,
+        hub_snapshot: bool = False,
     ) -> 'Union[HFDataset, HFIterableDataset]':
+        """hub_snapshot marks path as a cached Hugging Face Hub snapshot: it is read in place, at its own revision."""
         import datasets
 
         # Explicit local mirrors retain the legacy metadata workaround; SDK snapshots remain untouched.
         dataset_infos_path = os.path.join(path, 'dataset_infos.json')
-        if not cached_snapshot and os.path.exists(dataset_infos_path):
+        if not cached_snapshot and not hub_snapshot and os.path.exists(dataset_infos_path):
             logger.info(f'Removing dataset_infos.json file at {dataset_infos_path} to avoid datasets errors.')
             os.remove(dataset_infos_path)
 
@@ -129,7 +189,7 @@ class DatasetHub:
             path=path,
             name=subset if subset != 'default' else None,
             split=split,
-            revision=self.revision,
+            revision=None if hub_snapshot else self.revision,
             download_mode=datasets.DownloadMode.FORCE_REDOWNLOAD if self.force_redownload else None,
             **options,
         )
@@ -137,6 +197,53 @@ class DatasetHub:
             load_kwargs['trust_remote_code'] = self.trust_remote
         if cached_snapshot:
             load_kwargs = _prepare_cached_dataset_kwargs(load_kwargs, snapshot_cache_dir)
+        return datasets.load_dataset(**load_kwargs)
+
+    def _load_huggingface_hub(
+        self,
+        split: str,
+        subset: str,
+        options: Mapping[str, Any],
+    ) -> 'Union[HFDataset, HFIterableDataset]':
+        """Load a split from the Hugging Face Hub; if that fails (e.g. offline), load it from the dataset's cached
+        Hub snapshot. With no cached snapshot the error is raised."""
+        is_livecodebench_json = self.data_id_or_path == LIVECODEBENCH_REPO_ID and subset == 'release_latest'
+        try:
+            if is_livecodebench_json:
+                snapshot_path = _find_cached_dataset_snapshot(self.data_id_or_path)
+                return self._load_livecodebench_json(snapshot_path, split, options)
+            return self._load_huggingface(self.data_id_or_path, split, subset, options)
+        except Exception as exc:
+            snapshot_path = _find_cached_dataset_snapshot(self.data_id_or_path)
+            if snapshot_path is None:
+                raise
+            logger.warning(
+                f'Falling back to cached Hub snapshot for dataset {self.data_id_or_path} at {snapshot_path} '
+                f'after load_dataset failed: {exc}'
+            )
+            if is_livecodebench_json:
+                return self._load_livecodebench_json(snapshot_path, split, options)
+            return self._load_huggingface(str(snapshot_path), split, subset, options, hub_snapshot=True)
+
+    def _load_livecodebench_json(
+        self,
+        snapshot_path: Optional[Path],
+        split: str,
+        options: Mapping[str, Any],
+    ) -> 'Union[HFDataset, HFIterableDataset]':
+        """Load LiveCodeBench's test JSONL files from snapshot_path, or from the Hub when it is None."""
+        import datasets
+
+        load_kwargs = dict(
+            path='json',
+            data_files=_livecodebench_data_files(snapshot_path),
+            split=split,
+            download_mode=datasets.DownloadMode.FORCE_REDOWNLOAD if self.force_redownload else None,
+            features=_livecodebench_features(),
+            **options,
+        )
+        if 'trust_remote_code' in inspect.signature(datasets.load_dataset).parameters:
+            load_kwargs['trust_remote_code'] = self.trust_remote
         return datasets.load_dataset(**load_kwargs)
 
     def _load_modelscope(

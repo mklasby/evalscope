@@ -1,6 +1,7 @@
 import json
 import sys
 import types
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
@@ -14,6 +15,7 @@ from evalscope.api.dataset import (
     download_dataset_snapshot,
     load_dataset_from_hub,
 )
+from evalscope.api.dataset import hub as hub_module
 from evalscope.constants import HubType
 
 
@@ -909,3 +911,132 @@ def test_download_file_modelscope_uses_single_file_api(tmp_path: Path, monkeypat
         ('remote-dataset', 'images/page_[1].png', {'revision': 'v1', 'local_files_only': True}),
         ('remote-dataset', 'images/page_[1].png', {'revision': 'v1'}),
     ]
+
+
+def test_huggingface_load_retries_from_cached_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import datasets
+
+    snapshot = tmp_path / 'hub' / 'datasets--org--data' / 'snapshots' / 'abc123'
+    _write_snapshot(snapshot)
+    real_load_dataset = datasets.load_dataset
+    calls = []
+
+    def load_dataset(**kwargs: Any) -> HFDataset:
+        calls.append(kwargs)
+        if kwargs['path'] == 'org/data':
+            raise ConnectionError('offline')
+        return real_load_dataset(**kwargs)
+
+    monkeypatch.setattr(datasets, 'load_dataset', load_dataset)
+    monkeypatch.setattr(hub_module, '_find_cached_dataset_snapshot', lambda dataset_name: snapshot)
+
+    dataset = load_dataset_from_hub(
+        'org/data',
+        split='test',
+        data_source=HubType.HUGGINGFACE,
+        version='v1',
+        cache_dir=str(tmp_path / 'hf-cache'),
+    )
+
+    assert dataset['text'] == ['cached-test']
+    assert [call['path'] for call in calls] == ['org/data', str(snapshot)]
+    assert calls[0]['revision'] == 'v1'
+    assert calls[1]['revision'] is None
+
+
+def test_huggingface_cached_snapshot_keeps_its_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import datasets
+
+    snapshot = tmp_path / 'hub' / 'datasets--org--data' / 'snapshots' / 'abc123'
+    _write_snapshot(snapshot)
+    metadata = snapshot / 'dataset_infos.json'
+    metadata.write_text('{}', encoding='utf-8')
+
+    def load_dataset(**kwargs: Any) -> HFDataset:
+        if kwargs['path'] == 'org/data':
+            raise ConnectionError('offline')
+        return HFDataset.from_dict({'text': ['cached']})
+
+    monkeypatch.setattr(datasets, 'load_dataset', load_dataset)
+    monkeypatch.setattr(hub_module, '_find_cached_dataset_snapshot', lambda dataset_name: snapshot)
+
+    dataset = load_dataset_from_hub('org/data', split='test', data_source=HubType.HUGGINGFACE)
+
+    assert dataset['text'] == ['cached']
+    assert metadata.read_text(encoding='utf-8') == '{}'
+
+
+def test_huggingface_load_without_cached_snapshot_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    import datasets
+
+    def load_dataset(**kwargs: Any) -> HFDataset:
+        raise ConnectionError('offline')
+
+    monkeypatch.setattr(datasets, 'load_dataset', load_dataset)
+    monkeypatch.setattr(hub_module, '_find_cached_dataset_snapshot', lambda dataset_name: None)
+
+    with pytest.raises(ConnectionError, match='offline'):
+        load_dataset_from_hub('org/data', split='test', data_source=HubType.HUGGINGFACE)
+
+
+def test_huggingface_cached_snapshot_lookup_skips_local_paths(tmp_path: Path) -> None:
+    assert hub_module._find_cached_dataset_snapshot(str(tmp_path)) is None
+
+
+def _livecodebench_record(contest_date: str) -> dict:
+    record = {name: name for name in hub_module._livecodebench_features()}
+    record['contest_date'] = contest_date
+    return record
+
+
+def test_livecodebench_release_latest_reads_snapshot_jsonl_as_strings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot = tmp_path / 'snapshots' / 'rev'
+    snapshot.mkdir(parents=True)
+    (snapshot / 'test.jsonl').write_text(json.dumps(_livecodebench_record('2023-05-07T00:00:00')) + '\n')
+    (snapshot / 'test6.jsonl').write_text(json.dumps(_livecodebench_record('2025-01-04T00:00:00')) + '\n')
+    (snapshot / 'train.jsonl').write_text(json.dumps(_livecodebench_record('1999-01-01T00:00:00')) + '\n')
+    monkeypatch.setattr(hub_module, '_find_cached_dataset_snapshot', lambda dataset_name: snapshot)
+
+    dataset = load_dataset_from_hub(
+        'livecodebench/code_generation_lite',
+        split='test',
+        subset='release_latest',
+        data_source=HubType.HUGGINGFACE,
+        cache_dir=str(tmp_path / 'hf-cache'),
+    )
+
+    assert dataset.features['contest_date'].dtype == 'string'
+    assert sorted(datetime.fromisoformat(date) for date in dataset['contest_date']) == [
+        datetime(2023, 5, 7),
+        datetime(2025, 1, 4),
+    ]
+
+
+def test_livecodebench_json_loader_falls_back_to_cached_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+    import datasets
+
+    calls = []
+    snapshots = iter([None, Path('/nonexistent/livecodebench')])
+
+    def load_dataset(**kwargs: Any) -> dict:
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise ConnectionError('offline')
+        return {'loaded': kwargs['data_files']}
+
+    monkeypatch.setattr(datasets, 'load_dataset', load_dataset)
+    monkeypatch.setattr(hub_module, '_find_cached_dataset_snapshot', lambda dataset_name: next(snapshots))
+
+    result = load_dataset_from_hub(
+        'livecodebench/code_generation_lite',
+        split='test',
+        subset='release_latest',
+        data_source=HubType.HUGGINGFACE,
+    )
+
+    assert result == {'loaded': {'test': '/nonexistent/livecodebench/test*.jsonl'}}
+    assert calls[0]['data_files'] == hub_module.LIVECODEBENCH_DATA_FILES
+    assert [call['path'] for call in calls] == ['json', 'json']
+    assert calls[1]['features']['contest_date'].dtype == 'string'
