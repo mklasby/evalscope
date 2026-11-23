@@ -43,9 +43,16 @@ MBPP Plus is a fortified version of the MBPP benchmark, created to improve evalu
 - Default configuration uses **0-shot** evaluation
 - **Security Warning**: By default, code is executed in the local environment. We strongly recommend using sandbox execution. See the [sandbox documentation](https://evalscope.readthedocs.io/en/latest/user_guides/sandbox.html) for details.
 - Supports `pass@k` metric calculation
-- Default timeout is 20 seconds per problem
+- Default timeout is 60 seconds per problem (the extended EvalPlus suite)
 - Stricter evaluation than original MBPP benchmark
 """  # noqa: E501
+
+
+def evalplus_program(solution: str, metadata: Dict[str, Any]) -> str:
+    """The program EvalPlus checks for one MBPP+ problem: the solution, its test imports, the three original MBPP
+    asserts and the 'test' field, which runs the extended EvalPlus inputs (as EvalScope 1.14 builds it). The asserts
+    alone are base MBPP."""
+    return '\n'.join([solution, *metadata['test_imports'], *metadata['test_list'], metadata['test']])
 
 
 @register_benchmark(
@@ -61,7 +68,7 @@ MBPP Plus is a fortified version of the MBPP benchmark, created to improve evalu
         primary_metric=MetricSelector(name='accuracy', aggregation='pass_at_k', dimensions={'k': 1}),
         eval_split='test',
         prompt_template=PROMPT,
-        review_timeout=20,
+        review_timeout=60,
         sandbox_config={'image': 'python:3.11-slim', 'tools_config': {'shell_executor': {}, 'python_executor': {}}},
     )
 )
@@ -129,10 +136,7 @@ class MBPPplusAdapter(CodeExecutionSandboxMixin, DefaultDataAdapter):
             prediction=original_prediction,
         )
         problem = task_state.metadata
-        completion = filtered_prediction
-        # Append test cases to the completion
-        for test in task_state.metadata['test_list']:
-            completion += '\n' + test + '\n'
+        completion = evalplus_program(filtered_prediction, problem)
 
         res = self.execute_code_in_sandbox(code=completion, timeout=self.review_timeout, language='python')
         passed = res.get('status') == 'success'
