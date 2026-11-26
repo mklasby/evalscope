@@ -142,7 +142,10 @@ class MBPPplusAdapter(CodeExecutionSandboxMixin, DefaultDataAdapter):
         passed = res.get('status') == 'success'
         # Set score values
         score.value = {'acc': passed}
-        score.metadata = {'task_id': problem['task_id'], 'timeout': self.review_timeout, 'execution_result': res}
+        # evalplus_suite marks a review scored at the full EvalPlus suite (rescore_mbppplus.py skips marked reviews).
+        score.metadata = {
+            'task_id': problem['task_id'], 'timeout': self.review_timeout, 'execution_result': res, 'evalplus_suite': True
+        }
         score.main_score_name = 'acc'
 
         return score
